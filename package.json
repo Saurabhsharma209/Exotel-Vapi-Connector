@@ -1,0 +1,53 @@
+{
+  "name": "vapi-exotel-integration",
+  "version": "1.0.0",
+  "description": "Production-ready integration between Vapi AI voice assistants and Exotel telephony infrastructure",
+  "main": "lib/vapi-exotel-wss-solution.js",
+  "type": "module",
+  "scripts": {
+    "start": "node lib/vapi-exotel-wss-solution.js",
+    "bridge": "node lib/simple-working-bridge.js",
+    "trunk": "python3 scripts/vapi-exotel-tcp-trunk-setup.py",
+    "test": "node examples/test-integration.js",
+    "setup": "node scripts/setup-integration.js",
+    "dev": "nodemon lib/vapi-exotel-wss-solution.js"
+  },
+  "keywords": [
+    "vapi",
+    "exotel",
+    "websocket",
+    "sip",
+    "trunk",
+    "telephony",
+    "voice-ai",
+    "pstn",
+    "integration",
+    "ssl",
+    "audio-processing",
+    "real-time"
+  ],
+  "author": "Exotel Techcom Pvt Ltd",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/exotel/vapi-exotel-integration.git"
+  },
+  "homepage": "https://github.com/exotel/vapi-exotel-integration#readme",
+  "bugs": {
+    "url": "https://github.com/exotel/vapi-exotel-integration/issues"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+} 

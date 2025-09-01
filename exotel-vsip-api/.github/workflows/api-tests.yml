@@ -1,0 +1,379 @@
+name: Exotel vSIP API Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run tests daily at 9 AM UTC
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - unit
+          - integration
+          - load
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  environment-check:
+    name: Environment Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Validate required secrets
+      run: |
+        if [ -z "${{ secrets.EXO_AUTH_KEY }}" ]; then
+          echo "❌ EXO_AUTH_KEY secret not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.EXO_AUTH_TOKEN }}" ]; then
+          echo "❌ EXO_AUTH_TOKEN secret not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.EXO_SUBSCRIBIX_DOMAIN }}" ]; then
+          echo "❌ EXO_SUBSCRIBIX_DOMAIN secret not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.EXO_ACCOUNT_SID }}" ]; then
+          echo "❌ EXO_ACCOUNT_SID secret not set"
+          exit 1
+        fi
+        echo "✅ All required secrets are set"
+
+  mock-server-tests:
+    name: Mock Server Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+    
+    - name: Start mock server
+      run: |
+        python tests/mock_server.py --port 8080 &
+        echo $! > mock_server.pid
+        sleep 5  # Wait for server to start
+    
+    - name: Test against mock server
+      env:
+        EXO_AUTH_KEY: test_key
+        EXO_AUTH_TOKEN: test_token
+        EXO_SUBSCRIBIX_DOMAIN: localhost:8080
+        EXO_ACCOUNT_SID: test_account
+      run: |
+        chmod +x tests/*.py tests/*.sh
+        python tests/test_all_apis.py --verbose
+    
+    - name: Stop mock server
+      if: always()
+      run: |
+        if [ -f mock_server.pid ]; then
+          kill $(cat mock_server.pid) || true
+          rm mock_server.pid
+        fi
+    
+    - name: Upload mock test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: mock-test-results
+        path: logs/
+
+  api-validation-tests:
+    name: API Validation Tests
+    runs-on: ubuntu-latest
+    needs: environment-check
+    if: github.event_name != 'pull_request'  # Skip API tests on PRs
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+    
+    - name: Run API validation tests
+      env:
+        EXO_AUTH_KEY: ${{ secrets.EXO_AUTH_KEY }}
+        EXO_AUTH_TOKEN: ${{ secrets.EXO_AUTH_TOKEN }}
+        EXO_SUBSCRIBIX_DOMAIN: ${{ secrets.EXO_SUBSCRIBIX_DOMAIN }}
+        EXO_ACCOUNT_SID: ${{ secrets.EXO_ACCOUNT_SID }}
+        TRUNK_NAME: ci_test_trunk_${{ github.run_number }}
+        NSO_CODE: ${{ secrets.NSO_CODE || 'ANY-ANY' }}
+        DID_NUMBER: ${{ secrets.TEST_DID_NUMBER || '+1234567890' }}
+        WHITELIST_IP: ${{ secrets.TEST_WHITELIST_IP || '192.168.1.100' }}
+        TRUNK_DEST_IP: ${{ secrets.TEST_DEST_IP || '192.168.1.200' }}
+        TRUNK_DEST_PORT: ${{ secrets.TEST_DEST_PORT || '5060' }}
+      run: |
+        chmod +x tests/*.py tests/*.sh
+        python tests/test_all_apis.py --test create --verbose
+      timeout-minutes: 10
+    
+    - name: Upload API test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: api-test-results
+        path: logs/
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [environment-check, api-validation-tests]
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'integration'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+    
+    - name: Run integration tests
+      env:
+        EXO_AUTH_KEY: ${{ secrets.EXO_AUTH_KEY }}
+        EXO_AUTH_TOKEN: ${{ secrets.EXO_AUTH_TOKEN }}
+        EXO_SUBSCRIBIX_DOMAIN: ${{ secrets.EXO_SUBSCRIBIX_DOMAIN }}
+        EXO_ACCOUNT_SID: ${{ secrets.EXO_ACCOUNT_SID }}
+        TRUNK_NAME: integration_test_${{ github.run_number }}
+        NSO_CODE: ${{ secrets.NSO_CODE || 'ANY-ANY' }}
+        DID_NUMBER: ${{ secrets.TEST_DID_NUMBER || '+1234567890' }}
+        WHITELIST_IP: ${{ secrets.TEST_WHITELIST_IP || '192.168.1.100' }}
+        TRUNK_DEST_IP: ${{ secrets.TEST_DEST_IP || '192.168.1.200' }}
+        TRUNK_DEST_PORT: ${{ secrets.TEST_DEST_PORT || '5060' }}
+        EXOPHONE: ${{ secrets.TEST_EXOPHONE }}
+      run: |
+        chmod +x tests/*.py
+        python tests/integration_test.py --verbose
+      timeout-minutes: 15
+    
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-test-results
+        path: logs/
+
+  multi-language-tests:
+    name: Multi-Language Tests
+    runs-on: ubuntu-latest
+    needs: environment-check
+    if: github.event_name != 'pull_request'
+    
+    strategy:
+      matrix:
+        language: [curl, python, php, go, java]
+        include:
+          - language: curl
+            setup: sudo apt-get update && sudo apt-get install -y curl
+          - language: python
+            setup: python -m pip install --upgrade pip && pip install -r tests/requirements.txt
+          - language: php
+            setup: sudo apt-get update && sudo apt-get install -y php php-curl
+          - language: go
+            setup: echo "Go is pre-installed"
+          - language: java
+            setup: sudo apt-get update && sudo apt-get install -y openjdk-11-jdk
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python (for test runner)
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Set up Go
+      if: matrix.language == 'go'
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.19'
+    
+    - name: Setup language environment
+      run: ${{ matrix.setup }}
+    
+    - name: Test ${{ matrix.language }} implementation
+      env:
+        EXO_AUTH_KEY: ${{ secrets.EXO_AUTH_KEY }}
+        EXO_AUTH_TOKEN: ${{ secrets.EXO_AUTH_TOKEN }}
+        EXO_SUBSCRIBIX_DOMAIN: ${{ secrets.EXO_SUBSCRIBIX_DOMAIN }}
+        EXO_ACCOUNT_SID: ${{ secrets.EXO_ACCOUNT_SID }}
+        TRUNK_NAME: ${{ matrix.language }}_test_${{ github.run_number }}
+        NSO_CODE: ${{ secrets.NSO_CODE || 'ANY-ANY' }}
+      run: |
+        chmod +x tests/*.sh
+        ./tests/test_runner.sh ${{ matrix.language }}
+      timeout-minutes: 10
+    
+    - name: Upload ${{ matrix.language }} test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.language }}-test-results
+        path: logs/
+
+  load-tests:
+    name: Load Tests
+    runs-on: ubuntu-latest
+    needs: environment-check
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'load'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+    
+    - name: Start mock server for load testing
+      run: |
+        python tests/mock_server.py --port 8080 &
+        echo $! > mock_server.pid
+        sleep 5
+    
+    - name: Run load tests
+      run: |
+        chmod +x tests/*.py
+        python tests/load_test.py --mock --concurrent 5 --requests 20
+      timeout-minutes: 10
+    
+    - name: Stop mock server
+      if: always()
+      run: |
+        if [ -f mock_server.pid ]; then
+          kill $(cat mock_server.pid) || true
+          rm mock_server.pid
+        fi
+    
+    - name: Upload load test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: load-test-results
+        path: logs/
+
+  generate-report:
+    name: Generate Test Report
+    runs-on: ubuntu-latest
+    needs: [mock-server-tests, api-validation-tests, integration-tests, multi-language-tests]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Download all test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: test-artifacts/
+    
+    - name: Generate combined test report
+      run: |
+        mkdir -p reports
+        echo "# Exotel vSIP API Test Report" > reports/test-summary.md
+        echo "Generated: $(date)" >> reports/test-summary.md
+        echo "" >> reports/test-summary.md
+        
+        echo "## Test Results Summary" >> reports/test-summary.md
+        echo "" >> reports/test-summary.md
+        
+        # Process each test type
+        for dir in test-artifacts/*/; do
+          if [ -d "$dir" ]; then
+            test_type=$(basename "$dir")
+            echo "### $test_type" >> reports/test-summary.md
+            
+            # Count JSON result files
+            json_files=$(find "$dir" -name "*.json" | wc -l)
+            log_files=$(find "$dir" -name "*.log" | wc -l)
+            
+            echo "- JSON result files: $json_files" >> reports/test-summary.md
+            echo "- Log files: $log_files" >> reports/test-summary.md
+            echo "" >> reports/test-summary.md
+          fi
+        done
+        
+        echo "## Artifacts" >> reports/test-summary.md
+        echo "All test logs and results are available in the GitHub Actions artifacts." >> reports/test-summary.md
+    
+    - name: Upload combined report
+      uses: actions/upload-artifact@v3
+      with:
+        name: combined-test-report
+        path: reports/
+
+  notify-results:
+    name: Notify Test Results
+    runs-on: ubuntu-latest
+    needs: [generate-report]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    
+    steps:
+    - name: Notify on failure
+      if: needs.api-validation-tests.result == 'failure' || needs.integration-tests.result == 'failure'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const title = '🚨 Exotel vSIP API Tests Failed';
+          const body = `
+          **Test Run:** ${context.runNumber}
+          **Branch:** ${context.ref}
+          **Triggered by:** ${context.eventName}
+          
+          **Failed Jobs:**
+          ${context.payload.workflow_run ? '- ' + context.payload.workflow_run.jobs.filter(job => job.conclusion === 'failure').map(job => job.name).join('\n- ') : 'Check the Actions tab for details'}
+          
+          **Action Required:**
+          Please check the test logs and investigate the failures.
+          
+          [View Test Results](${context.payload.repository.html_url}/actions/runs/${context.runId})
+          `;
+          
+          // This would typically send to Slack, email, or create an issue
+          console.log(title);
+          console.log(body); 
