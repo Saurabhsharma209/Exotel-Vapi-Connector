@@ -32,8 +32,8 @@ This repository provides a comprehensive, production-tested solution for integra
 Before starting, ensure you have access to:
 
 1. **Exotel Account** with vSIP API access
-   - 📋 **Get API credentials**: https://my.exotel.com/apisettings/site#api-credentials
-   - 📞 **Virtual Numbers**: https://my.exotel.com/numbers
+   - 📋 **Get API credentials**: https://my.in.exotel.com/apisettings/site#api-credentials
+   - 📞 **Virtual Numbers**: https://my.in.exotel.com/numbers
    - 🏢 **Account SID, API Key, Auth Token** required
 
 2. **Vapi Account** with AI assistant
@@ -63,7 +63,7 @@ cd vapi-exotel-integration
    
    Fill in these values from your dashboards:
    ```bash
-   # From Exotel Dashboard (https://my.exotel.com/apisettings/site#api-credentials)
+   # From Exotel Dashboard (https://my.in.exotel.com/apisettings/site#api-credentials)
    EXO_AUTH_KEY=your_exotel_api_key_here
    EXO_AUTH_TOKEN=your_exotel_auth_token_here
    EXO_ACCOUNT_SID=your_exotel_account_sid_here
